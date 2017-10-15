@@ -9,7 +9,7 @@
 
 #define HAKOMARI_DEVICE_TIMEOUT 6000
 #define HAKOMARI_BUF_SIZE 1024
-#define HAKOMARI_PRODUCT_PREFIX "HakoMari"
+#define HAKOMARI_PRODUCT_PREFIX "Hakomari"
 
 typedef enum hakomari_frame_type_e
 {
