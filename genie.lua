@@ -33,7 +33,7 @@ solution "lip"
 		}
 
 		if _OPTIONS["with-asan"] then
-			add_flags { "-fsanitize=address", "-fPIC" }
+			add_flags { "-fsanitize=address" }
 		end
 
 		newoption {
