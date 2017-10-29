@@ -39,9 +39,6 @@ struct hakomari_endpoint_desc_s
 
 	/// User-defined name (e.g: "My HODL")
 	hakomari_string_t name;
-
-	/// User-defined description (e.g: "Moon plz")
-	hakomari_string_t description;
 };
 
 struct hakomari_input_s
@@ -86,7 +83,8 @@ hakomari_inspect_endpoint(
 
 hakomari_error_t
 hakomari_create_endpoint(
-	hakomari_device_t* device, const hakomari_endpoint_desc_t* desc
+	hakomari_device_t* device, const hakomari_endpoint_desc_t* desc,
+	hakomari_input_t* payload
 );
 
 hakomari_error_t

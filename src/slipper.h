@@ -92,6 +92,9 @@ slipper_read(
 SLIPPER_API slipper_error_t
 slipper_end_read(slipper_ctx_t* ctx, slipper_timeout_t timeout);
 
+SLIPPER_API const char*
+slipper_errorstr(slipper_error_t error);
+
 #ifdef SLIPPER_IMPLEMENTATION
 
 #include <stdint.h>
@@ -105,7 +108,7 @@ static const uint8_t SLIPPER_MSG_ESCAPED_END[] = { SLIPPER_MSG_ESC, SLIPPER_MSG_
 static const uint8_t SLIPPER_MSG_ESCAPED_ESC[] = { SLIPPER_MSG_ESC, SLIPPER_MSG_ESC_ESC };
 
 static slipper_error_t
-slipper_fill_read_buf(slipper_ctx_t* ctx, slipper_timeout_t timeout)
+slipper_ensure_read_buf(slipper_ctx_t* ctx, slipper_timeout_t timeout)
 {
 	if(ctx->cursor < ctx->read_limit) { return SLIPPER_OK; }
 
@@ -129,7 +132,7 @@ static slipper_error_t
 slipper_read_byte(slipper_ctx_t* ctx, uint8_t* byte, slipper_timeout_t timeout)
 {
 	slipper_error_t error;
-	if((error = slipper_fill_read_buf(ctx, timeout)) != SLIPPER_OK)
+	if((error = slipper_ensure_read_buf(ctx, timeout)) != SLIPPER_OK)
 	{
 		return error;
 	}
@@ -205,6 +208,25 @@ slipper_write_delimiter(slipper_ctx_t* ctx, slipper_timeout_t timeout)
 	uint8_t header[] = { SLIPPER_MSG_END };
 	size_t size = sizeof(header);
 	return slipper_write_escaped(ctx, header, size, timeout);
+}
+
+
+const char*
+slipper_errorstr(slipper_error_t error)
+{
+	switch(error)
+	{
+		case SLIPPER_OK:
+			return "No error";
+		case SLIPPER_ERR_IO:
+			return "IO error";
+		case SLIPPER_ERR_ENCODING:
+			return "Encoding error";
+		case SLIPPER_ERR_TIMED_OUT:
+			return "Timed out";
+		default:
+			return "Sum Ting Wong";
+	}
 }
 
 slipper_error_t

@@ -7,14 +7,14 @@
 #define SLIPPER_IMPLEMENTATION
 #include "slipper.h"
 
-#define HAKOMARI_DEVICE_TIMEOUT 6000
+#define HAKOMARI_DEVICE_TIMEOUT 10000
 #define HAKOMARI_BUF_SIZE 1024
 #define HAKOMARI_PRODUCT_PREFIX "Hakomari"
 
 typedef enum hakomari_frame_type_e
 {
-	HAKOMARI_FRAME_REQREP = 0,
-	HAKOMARI_FRAME_KEEPALIVE,
+	HAKOMARI_FRAME_REQ = 0,
+	HAKOMARI_FRAME_REP,
 } hakomari_frame_type_t;
 
 struct hakomari_ctx_s
@@ -276,7 +276,7 @@ hakomari_cmp_read(cmp_ctx_t* ctx, void* data, size_t limit)
 	size_t bytes_read = limit;
 	return slipper_read(
 		&device->slipper, data, &bytes_read, HAKOMARI_DEVICE_TIMEOUT
-	) == SLIPPER_OK && bytes_read != limit;
+	) == SLIPPER_OK && bytes_read == limit;
 }
 
 static size_t
@@ -305,13 +305,13 @@ hakomari_serial_write(
 	hakomari_set_last_error(device->ctx, HAKOMARI_OK, NULL);
 
 	enum sp_return error;
-	if((error = sp_blocking_write(device->port, data, size, timeout) < 0))
+	if((error = sp_blocking_write(device->port, data, size, timeout) <= 0))
 	{
 		hakomari_set_sp_error(device->ctx, error);
 		return SLIPPER_ERR_IO;
 	}
 
-	if(flush && (error = sp_drain(device->port)) < 0)
+	if(flush && (error = sp_drain(device->port)) != 0)
 	{
 		hakomari_set_sp_error(device->ctx, error);
 		return SLIPPER_ERR_IO;
@@ -331,10 +331,18 @@ hakomari_serial_read(
 	hakomari_set_last_error(device->ctx, HAKOMARI_OK, NULL);
 
 	enum sp_return bytes_read;
-	if((bytes_read = sp_blocking_read_next(device->port, data, *size, timeout) <= 0))
+	if((bytes_read = sp_blocking_read_next(device->port, data, *size, timeout)) <= 0)
 	{
-		hakomari_set_sp_error(device->ctx, bytes_read);
-		return bytes_read == 0 ? SLIPPER_ERR_TIMED_OUT : SLIPPER_ERR_IO;
+		if(bytes_read < 0)
+		{
+			hakomari_set_sp_error(device->ctx, bytes_read);
+			return SLIPPER_ERR_IO;
+		}
+		else
+		{
+			hakomari_set_last_error(device->ctx, HAKOMARI_ERR_IO, "Device timed out");
+			return SLIPPER_ERR_TIMED_OUT;
+		}
 	}
 
 	*size = bytes_read;
@@ -459,7 +467,7 @@ hakomari_set_cmp_error(hakomari_device_t* device)
 	}
 }
 
-static bool
+static hakomari_error_t
 hakomari_read_endpoint_desc(
 	hakomari_device_t* device, hakomari_endpoint_desc_t* desc
 )
@@ -470,7 +478,7 @@ hakomari_read_endpoint_desc(
 		return hakomari_set_cmp_error(device);
 	}
 
-	if(map_size != 3)
+	if(map_size != 2)
 	{
 		return hakomari_set_last_error(
 			device->ctx, HAKOMARI_ERR_IO, "Format error"
@@ -494,10 +502,6 @@ hakomari_read_endpoint_desc(
 		else if(strcmp(key, "name") == 0)
 		{
 			value = desc->name;
-		}
-		else if(strcmp(key, "description") == 0)
-		{
-			value = desc->description;
 		}
 		else
 		{
@@ -529,7 +533,9 @@ hakomari_enumerate_endpoints(hakomari_device_t* device, size_t* num_endpoints)
 		return hakomari_set_cmp_error(device);
 	}
 
-	device->endpoints = realloc(device->endpoints, device->num_endpoints);
+	device->endpoints = realloc(
+		device->endpoints, device->num_endpoints * sizeof(hakomari_endpoint_desc_t)
+	);
 	if(device->endpoints == NULL)
 	{
 		return hakomari_set_last_error(device->ctx, HAKOMARI_ERR_MEMORY, NULL);
@@ -537,9 +543,10 @@ hakomari_enumerate_endpoints(hakomari_device_t* device, size_t* num_endpoints)
 
 	for(uint32_t i = 0; i < device->num_endpoints; ++i)
 	{
-		if(!hakomari_read_endpoint_desc(device, &device->endpoints[i]))
+		hakomari_error_t error;
+		if((error = hakomari_read_endpoint_desc(device, &device->endpoints[i])) != 0)
 		{
-			return device->ctx->last_error;
+			return error;
 		}
 	}
 
@@ -584,7 +591,7 @@ hakomari_begin_query(
 		return hakomari_set_cmp_error(device);
 	}
 
-	if(!cmp_write_u8(&device->cmp, HAKOMARI_FRAME_REQREP))
+	if(!cmp_write_u8(&device->cmp, HAKOMARI_FRAME_REQ))
 	{
 		return hakomari_set_cmp_error(device);
 	}
@@ -630,10 +637,11 @@ hakomari_begin_query(
 static hakomari_error_t
 hakomari_end_query(hakomari_device_t* device, hakomari_input_t** result)
 {
-	if(slipper_end_write(&device->slipper, HAKOMARI_DEVICE_TIMEOUT) != SLIPPER_OK)
+	slipper_error_t error;
+	if((error = slipper_end_write(&device->slipper, HAKOMARI_DEVICE_TIMEOUT)) != 0)
 	{
 		return hakomari_set_last_error(
-			device->ctx, HAKOMARI_ERR_IO, "Error while writing message end"
+			device->ctx, HAKOMARI_ERR_IO, slipper_errorstr(error)
 		);
 	}
 
@@ -643,9 +651,7 @@ hakomari_end_query(hakomari_device_t* device, hakomari_input_t** result)
 			&device->slipper, HAKOMARI_DEVICE_TIMEOUT
 		) != SLIPPER_OK)
 		{
-			return hakomari_set_last_error(
-				device->ctx, HAKOMARI_ERR_IO, "Error while reading reply"
-			);
+			return device->ctx->last_error;
 		}
 
 		uint32_t size;
@@ -667,7 +673,7 @@ hakomari_end_query(hakomari_device_t* device, hakomari_input_t** result)
 			return hakomari_set_cmp_error(device);
 		}
 
-		if(type != HAKOMARI_FRAME_REQREP || type != HAKOMARI_FRAME_KEEPALIVE)
+		if(type != HAKOMARI_FRAME_REP)
 		{
 			return hakomari_set_last_error(
 				device->ctx, HAKOMARI_ERR_IO, "Format error"
@@ -680,7 +686,7 @@ hakomari_end_query(hakomari_device_t* device, hakomari_input_t** result)
 			return hakomari_set_cmp_error(device);
 		}
 
-		if(txid != device->txid || type == HAKOMARI_FRAME_KEEPALIVE)
+		if(txid != (device->txid - 1))
 		{
 			if(slipper_end_read(
 				&device->slipper, HAKOMARI_DEVICE_TIMEOUT
@@ -726,6 +732,41 @@ hakomari_end_query(hakomari_device_t* device, hakomari_input_t** result)
 	return hakomari_set_last_error(device->ctx, HAKOMARI_OK, NULL);
 }
 
+static hakomari_error_t
+hakomari_send_payload(hakomari_device_t* device, hakomari_input_t* payload)
+{
+	char buf[HAKOMARI_BUF_SIZE];
+	size_t size;
+
+	do
+	{
+		size = HAKOMARI_BUF_SIZE;
+		switch(hakomari_read(payload, buf, &size))
+		{
+			case HAKOMARI_OK:
+				if(slipper_write(
+					&device->slipper, buf, size, HAKOMARI_DEVICE_TIMEOUT
+				) != SLIPPER_OK)
+				{
+					return hakomari_set_last_error(
+						device->ctx, HAKOMARI_ERR_IO, "Error while sending payload"
+					);
+				}
+				break;
+			case HAKOMARI_ERR_IO:
+				return hakomari_set_last_error(
+					device->ctx, HAKOMARI_ERR_IO, "Error while reading payload"
+				);
+			default:
+				return hakomari_set_last_error(
+					device->ctx, HAKOMARI_ERR_INVALID, "Invalid payload stream"
+				);
+		}
+	} while(size);
+
+	return hakomari_set_last_error(device->ctx, HAKOMARI_OK, NULL);
+}
+
 hakomari_error_t
 hakomari_query_endpoint(
 	hakomari_device_t* device, const hakomari_endpoint_desc_t* desc,
@@ -739,36 +780,12 @@ hakomari_query_endpoint(
 		return error;
 	}
 
-	if(payload)
+	if(true
+		&& payload != NULL
+		&& (error = hakomari_send_payload(device, payload)) != HAKOMARI_OK
+	)
 	{
-		char buf[HAKOMARI_BUF_SIZE];
-		size_t size;
-
-		do
-		{
-			size = HAKOMARI_BUF_SIZE;
-			switch(hakomari_read(payload, buf, &size))
-			{
-				case HAKOMARI_OK:
-					if(slipper_write(
-						&device->slipper, buf, size, HAKOMARI_DEVICE_TIMEOUT
-					) != SLIPPER_OK)
-					{
-						return hakomari_set_last_error(
-							device->ctx, HAKOMARI_ERR_IO, "Error while sending payload"
-						);
-					}
-					break;
-				case HAKOMARI_ERR_IO:
-					return hakomari_set_last_error(
-						device->ctx, HAKOMARI_ERR_IO, "Error while reading payload"
-					);
-				default:
-					return hakomari_set_last_error(
-						device->ctx, HAKOMARI_ERR_INVALID, "Invalid payload stream"
-					);
-			}
-		} while(size);
+		return error;
 	}
 
 	return hakomari_end_query(device, result);
@@ -776,7 +793,8 @@ hakomari_query_endpoint(
 
 hakomari_error_t
 hakomari_create_endpoint(
-	hakomari_device_t* device, const hakomari_endpoint_desc_t* endpoint
+	hakomari_device_t* device, const hakomari_endpoint_desc_t* endpoint,
+	hakomari_input_t* payload
 )
 {
 	hakomari_error_t error;
@@ -810,14 +828,12 @@ hakomari_create_endpoint(
 		return hakomari_set_cmp_error(device);
 	}
 
-	if(!cmp_write_str(&device->cmp, "description", sizeof("description") - 1))
+	if(true
+		&& payload != NULL
+		&& (error = hakomari_send_payload(device, payload)) != HAKOMARI_OK
+	)
 	{
-		return hakomari_set_cmp_error(device);
-	}
-
-	if(!cmp_write_str(&device->cmp, endpoint->description, strlen(endpoint->description)))
-	{
-		return hakomari_set_cmp_error(device);
+		return error;
 	}
 
 	return hakomari_end_query(device, NULL);

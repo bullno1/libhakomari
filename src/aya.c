@@ -53,16 +53,14 @@ parse_command_args(int argc, char* command_argv[], ...)
 }
 
 static bool
-parse_endpoint(
+parse_endpoint_cmd(
 	char* command_argv[],
-	bool requires_description,
-	hakomari_endpoint_desc_t* endpoint_desc
+	hakomari_endpoint_desc_t* endpoint_desc,
+	hakomari_string_t* query_ptr
 )
 {
-	const char *type, *name, *description;
-	int num_args = requires_description ? 3 : 2;
-
-	if(!parse_command_args(num_args, command_argv, &type, &name, &description))
+	const char *type, *name, *query;
+	if(!parse_command_args(query_ptr ? 3 : 2, command_argv, &type, &name, &query))
 	{
 		return false;
 	}
@@ -72,7 +70,7 @@ parse_endpoint(
 	if(false
 		|| strlen(type) > sizeof(hakomari_string_t)
 		|| strlen(name) > sizeof(hakomari_string_t)
-		|| (!requires_description || strlen(description) > sizeof(hakomari_string_t))
+		|| (query != NULL && strlen(query) > sizeof(hakomari_string_t))
 	)
 	{
 		fprintf(stderr, PROG_NAME ": Arguments too long\n");
@@ -81,9 +79,9 @@ parse_endpoint(
 
 	strncpy(endpoint_desc->type, type, sizeof(hakomari_string_t));
 	strncpy(endpoint_desc->name, name, sizeof(hakomari_string_t));
-	if(requires_description)
+	if(query_ptr != NULL)
 	{
-		strncpy(endpoint_desc->description, description, sizeof(hakomari_string_t));
+		strncpy(*query_ptr, query, sizeof(hakomari_string_t));
 	}
 
 	return true;
@@ -217,6 +215,11 @@ main(int argc, char* argv[])
 
 	char** command_argv = &options.argv[options.optind];
 	hakomari_endpoint_desc_t endpoint_desc;
+	hakomari_input_t query_payload = {
+		.userdata = stdin,
+		.read = std_read
+	};
+
 	if(strcmp(command, "list") == 0)
 	{
 		for(size_t i = 0; i < num_endpoints; ++i)
@@ -229,21 +232,20 @@ main(int argc, char* argv[])
 				quit(EXIT_FAILURE);
 			}
 
-			fprintf(stdout, "Name: %s\n", endpoint_desc->name);
-			fprintf(stdout, "Type: %s\n", endpoint_desc->type);
-			fprintf(stdout, "Description: %s\n\n", endpoint_desc->description);
+			fprintf(stdout, "- type: %s\n", endpoint_desc->type);
+			fprintf(stdout, "  name: %s\n", endpoint_desc->name);
 		}
 
 		quit(EXIT_SUCCESS);
 	}
 	else if(strcmp(command, "create") == 0)
 	{
-		if(!parse_endpoint(command_argv, true, &endpoint_desc))
+		if(!parse_endpoint_cmd(command_argv, &endpoint_desc, NULL))
 		{
 			quit(EXIT_FAILURE);
 		}
 
-		if(hakomari_create_endpoint(device, &endpoint_desc) != HAKOMARI_OK)
+		if(hakomari_create_endpoint(device, &endpoint_desc, &query_payload) != HAKOMARI_OK)
 		{
 			hakomari_get_last_error(ctx, &error);
 			fprintf(stderr, PROG_NAME ": Could not create endpoint: %s\n", error);
@@ -254,7 +256,7 @@ main(int argc, char* argv[])
 	}
 	else if(strcmp(command, "destroy") == 0)
 	{
-		if(!parse_endpoint(command_argv, false, &endpoint_desc))
+		if(!parse_endpoint_cmd(command_argv, &endpoint_desc, NULL))
 		{
 			quit(EXIT_FAILURE);
 		}
@@ -270,21 +272,15 @@ main(int argc, char* argv[])
 	}
 	else if(strcmp(command, "query") == 0)
 	{
-		// Cheating a bit by storing the query in the description field
-		if(!parse_endpoint(command_argv, true, &endpoint_desc))
+		hakomari_string_t query;
+		if(!parse_endpoint_cmd(command_argv, &endpoint_desc, &query))
 		{
 			quit(EXIT_FAILURE);
 		}
 
-
-		hakomari_input_t query_payload = {
-			.userdata = stdin,
-			.read = std_read
-		};
-
 		hakomari_input_t* result;
 		if(hakomari_query_endpoint(
-			device, &endpoint_desc, endpoint_desc.description,
+			device, &endpoint_desc, query,
 			&query_payload, &result
 		) != HAKOMARI_OK)
 		{
@@ -312,6 +308,11 @@ main(int argc, char* argv[])
 		}
 
 		quit(EXIT_SUCCESS);
+	}
+	else
+	{
+		fprintf(stderr, PROG_NAME ": Invalid command\n");
+		quit(EXIT_FAILURE);
 	}
 
 quit:
