@@ -245,7 +245,7 @@ main(int argc, char* argv[])
 			quit(EXIT_FAILURE);
 		}
 
-		if(hakomari_create_endpoint(device, &endpoint_desc, &query_payload) != HAKOMARI_OK)
+		if(hakomari_create_endpoint(device, &endpoint_desc) != HAKOMARI_OK)
 		{
 			hakomari_get_last_error(ctx, &error);
 			fprintf(stderr, PROG_NAME ": Could not create endpoint: %s\n", error);

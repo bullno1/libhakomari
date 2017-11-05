@@ -710,21 +710,7 @@ hakomari_end_query(hakomari_device_t* device, hakomari_input_t** result)
 			return hakomari_set_cmp_error(device);
 		}
 
-		switch((hakomari_error_t)result)
-		{
-			case HAKOMARI_OK:
-			case HAKOMARI_ERR_DENIED:
-			case HAKOMARI_ERR_AUTH_REQUIRED:
-			case HAKOMARI_ERR_INVALID:
-				return hakomari_set_last_error(device->ctx, result, NULL);
-			default:
-				return hakomari_set_last_error(
-					device->ctx, HAKOMARI_ERR_IO, "Format error"
-				);
-				break;
-		}
-
-		break;
+		return hakomari_set_last_error(device->ctx, (hakomari_error_t)result, NULL);
 	}
 
 	if(result)
@@ -794,61 +780,14 @@ hakomari_query_endpoint(
 	return hakomari_end_query(device, result);
 }
 
-hakomari_error_t
-hakomari_create_endpoint(
+static hakomari_error_t
+hakomari_create_or_destroy_endpoint(
 	hakomari_device_t* device, const hakomari_endpoint_desc_t* endpoint,
-	hakomari_input_t* payload
+	const char* op
 )
 {
 	hakomari_error_t error;
-	if((error = hakomari_begin_query(device, NULL, "create")) != HAKOMARI_OK)
-	{
-		return error;
-	}
-
-	if(!cmp_write_map(&device->cmp, 3))
-	{
-		return hakomari_set_cmp_error(device);
-	}
-
-	if(!cmp_write_str(&device->cmp, "type", sizeof("type") - 1))
-	{
-		return hakomari_set_cmp_error(device);
-	}
-
-	if(!cmp_write_str(&device->cmp, endpoint->type, strlen(endpoint->type)))
-	{
-		return hakomari_set_cmp_error(device);
-	}
-
-	if(!cmp_write_str(&device->cmp, "name", sizeof("name") - 1))
-	{
-		return hakomari_set_cmp_error(device);
-	}
-
-	if(!cmp_write_str(&device->cmp, endpoint->name, strlen(endpoint->name)))
-	{
-		return hakomari_set_cmp_error(device);
-	}
-
-	if(true
-		&& payload != NULL
-		&& (error = hakomari_send_payload(device, payload)) != HAKOMARI_OK
-	)
-	{
-		return error;
-	}
-
-	return hakomari_end_query(device, NULL);
-}
-
-hakomari_error_t
-hakomari_destroy_endpoint(
-	hakomari_device_t* device, const hakomari_endpoint_desc_t* endpoint
-)
-{
-	hakomari_error_t error;
-	if((error = hakomari_begin_query(device, NULL, "destroy")) != HAKOMARI_OK)
+	if((error = hakomari_begin_query(device, NULL, op)) != HAKOMARI_OK)
 	{
 		return error;
 	}
@@ -879,4 +818,20 @@ hakomari_destroy_endpoint(
 	}
 
 	return hakomari_end_query(device, NULL);
+}
+
+hakomari_error_t
+hakomari_create_endpoint(
+	hakomari_device_t* device, const hakomari_endpoint_desc_t* endpoint
+)
+{
+	return hakomari_create_or_destroy_endpoint(device, endpoint, "create");
+}
+
+hakomari_error_t
+hakomari_destroy_endpoint(
+	hakomari_device_t* device, const hakomari_endpoint_desc_t* endpoint
+)
+{
+	return hakomari_create_or_destroy_endpoint(device, endpoint, "destroy");
 }

@@ -83,8 +83,7 @@ hakomari_inspect_endpoint(
 
 hakomari_error_t
 hakomari_create_endpoint(
-	hakomari_device_t* device, const hakomari_endpoint_desc_t* desc,
-	hakomari_input_t* payload
+	hakomari_device_t* device, const hakomari_endpoint_desc_t* desc
 );
 
 hakomari_error_t
