@@ -70,7 +70,7 @@ parse_endpoint_cmd(
 	if(false
 		|| strlen(type) > sizeof(hakomari_string_t)
 		|| strlen(name) > sizeof(hakomari_string_t)
-		|| (query != NULL && strlen(query) > sizeof(hakomari_string_t))
+		|| (query_ptr != NULL && strlen(query) > sizeof(hakomari_string_t))
 	)
 	{
 		fprintf(stderr, PROG_NAME ": Arguments too long\n");

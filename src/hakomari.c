@@ -485,6 +485,9 @@ hakomari_read_endpoint_desc(
 		);
 	}
 
+	memset(desc->type, 0, sizeof(desc->type));
+	memset(desc->name, 0, sizeof(desc->name));
+
 	for(uint32_t i = 0; i < map_size; ++i)
 	{
 		hakomari_string_t key;
