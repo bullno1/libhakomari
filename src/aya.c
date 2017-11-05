@@ -302,9 +302,9 @@ main(int argc, char* argv[])
 				quit(EXIT_FAILURE);
 			}
 
-			fwrite(buf, sizeof(buf[0]), size, stdout);
+			if(size == 0) { break; }
 
-			if(size < sizeof(buf)) { break; }
+			fwrite(buf, sizeof(buf[0]), size, stdout);
 		}
 
 		quit(EXIT_SUCCESS);
