@@ -640,6 +640,7 @@ hakomari_begin_query(
 static hakomari_error_t
 hakomari_end_query(hakomari_device_t* device, hakomari_input_t** result)
 {
+	hakomari_error_t status = HAKOMARI_OK;
 	slipper_error_t error;
 	if((error = slipper_end_write(&device->slipper, HAKOMARI_DEVICE_TIMEOUT)) != 0)
 	{
@@ -710,15 +711,16 @@ hakomari_end_query(hakomari_device_t* device, hakomari_input_t** result)
 			return hakomari_set_cmp_error(device);
 		}
 
-		return hakomari_set_last_error(device->ctx, (hakomari_error_t)result, NULL);
+		status = (hakomari_error_t)result;
+		break;
 	}
 
 	if(result)
 	{
-		*result = &device->result;
+		*result = status == HAKOMARI_OK ? &device->result : NULL;
 	}
 
-	return hakomari_set_last_error(device->ctx, HAKOMARI_OK, NULL);
+	return hakomari_set_last_error(device->ctx, status, NULL);
 }
 
 static hakomari_error_t

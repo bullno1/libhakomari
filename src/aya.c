@@ -278,7 +278,7 @@ main(int argc, char* argv[])
 			quit(EXIT_FAILURE);
 		}
 
-		hakomari_input_t* result;
+		hakomari_input_t* result = NULL;
 		if(hakomari_query_endpoint(
 			device, &endpoint_desc, query,
 			&query_payload, &result
@@ -298,11 +298,11 @@ main(int argc, char* argv[])
 			if(hakomari_read(result, buf, &size) != HAKOMARI_OK)
 			{
 				hakomari_get_last_error(ctx, &error);
-				fprintf(stderr, PROG_NAME ": Could not query endpoint: %s\n", error);
+				fprintf(stderr, PROG_NAME ": Error while reading reply: %s\n", error);
 				quit(EXIT_FAILURE);
 			}
 
-			fwrite(buf, sizeof(buf[0]), sizeof(buf), stdout);
+			fwrite(buf, sizeof(buf[0]), size, stdout);
 
 			if(size < sizeof(buf)) { break; }
 		}
