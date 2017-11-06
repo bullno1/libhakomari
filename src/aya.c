@@ -97,6 +97,7 @@ main(int argc, char* argv[])
 	struct optparse_long opts[] = {
 		{"help", 'h', OPTPARSE_NONE},
 		{"device", 'd', OPTPARSE_REQUIRED},
+		{"no-input", 'n', OPTPARSE_NONE},
 		{0}
 	};
 
@@ -113,6 +114,7 @@ main(int argc, char* argv[])
 	options.permute = 0;
 
 	bool set_device = false;
+	bool no_input = false;
 	size_t device_index = 0;
 	hakomari_ctx_t* ctx = NULL;
 	hakomari_device_t* device = NULL;
@@ -131,6 +133,9 @@ main(int argc, char* argv[])
 					quit(EXIT_FAILURE);
 				}
 				set_device = true;
+				break;
+			case 'n':
+				no_input = true;
 				break;
 			case 'h':
 				optparse_help(usage, opts, help);
@@ -281,7 +286,7 @@ main(int argc, char* argv[])
 		hakomari_input_t* result = NULL;
 		if(hakomari_query_endpoint(
 			device, &endpoint_desc, query,
-			&query_payload, &result
+			no_input ? NULL : &query_payload, &result
 		) != HAKOMARI_OK)
 		{
 			hakomari_get_last_error(ctx, &error);
