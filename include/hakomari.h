@@ -4,12 +4,16 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-typedef struct hakomari_cfg_s hakomari_cfg_t;
+#define HAKOMARI_DEVICE_TIMEOUT 10000
+
 typedef struct hakomari_ctx_s hakomari_ctx_t;
 typedef struct hakomari_device_s hakomari_device_t;
 typedef struct hakomari_device_desc_s hakomari_device_desc_t;
 typedef struct hakomari_endpoint_desc_s hakomari_endpoint_desc_t;
 typedef struct hakomari_input_s hakomari_input_t;
+typedef struct hakomari_auth_handler_s hakomari_auth_handler_t;
+typedef struct hakomari_auth_ctx_s hakomari_auth_ctx_t;
+typedef struct hakomari_passphrase_screen_s hakomari_passphrase_screen_t;
 
 typedef char hakomari_string_t[128];
 
@@ -47,11 +51,40 @@ struct hakomari_input_s
 	hakomari_error_t(*read)(void* userdata, void* buf, size_t* size);
 };
 
+struct hakomari_auth_handler_s
+{
+	void* userdata;
+	hakomari_error_t(*ask_passphrase)(
+		void* userdata, hakomari_auth_ctx_t* auth_ctx
+	);
+};
+
+struct hakomari_passphrase_button_s
+{
+	unsigned int x;
+	unsigned int y;
+	unsigned int width;
+	unsigned int height;
+};
+
+struct hakomari_passphrase_screen_s
+{
+	unsigned int width;
+	unsigned int height;
+	unsigned int num_buttons;
+	struct hakomari_passphrase_button_s* buttons;
+};
+
 hakomari_error_t
 hakomari_create_context(hakomari_ctx_t** context_ptr);
 
 void
 hakomari_destroy_context(hakomari_ctx_t* context);
+
+hakomari_error_t
+hakomari_set_auth_handler(
+	hakomari_ctx_t* context, hakomari_auth_handler_t* auth_handler
+);
 
 hakomari_error_t
 hakomari_get_last_error(hakomari_ctx_t* context, const char** error);
@@ -99,8 +132,14 @@ hakomari_query_endpoint(
 );
 
 hakomari_error_t
+hakomari_inspect_passphrase_screen(
+	hakomari_auth_ctx_t* auth_ctx,
+	const hakomari_passphrase_screen_t** screen_ptr
+);
+
+hakomari_error_t
 hakomari_input_passphrase(
-	hakomari_device_t* device, const hakomari_endpoint_desc_t* desc,
+	hakomari_auth_ctx_t* auth_ctx,
 	unsigned int x, unsigned int y, bool down
 );
 

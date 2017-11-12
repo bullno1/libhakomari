@@ -1,3 +1,4 @@
+#include <SDL2/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,13 @@
 
 #define PROG_NAME "aya"
 #define quit(code) do { exit_code = code; goto quit; } while(0);
+
+struct ask_passphrase_ctx_s
+{
+	hakomari_ctx_t* hakomari_ctx;
+	SDL_Window* window;
+	SDL_Renderer* renderer;
+};
 
 static hakomari_error_t
 std_read(void* userdata, void* buf, size_t* size)
@@ -87,6 +95,140 @@ parse_endpoint_cmd(
 	return true;
 }
 
+static hakomari_error_t
+ask_passphrase(void* userdata, hakomari_auth_ctx_t* auth_ctx)
+{
+	struct ask_passphrase_ctx_s* ctx = userdata;
+
+	const hakomari_passphrase_screen_t* passphrase_screen;
+	hakomari_error_t error = hakomari_inspect_passphrase_screen(
+		auth_ctx, &passphrase_screen
+	);
+
+	if(error != HAKOMARI_OK)
+	{
+		const char* last_error;
+		hakomari_get_last_error(ctx->hakomari_ctx, &last_error);
+		fprintf(
+			stderr, PROG_NAME ": Could not find passphrase screen spec: %s\n",
+			last_error
+		);
+		return error;
+	}
+
+	if(ctx->window == NULL)
+	{
+		int status = SDL_CreateWindowAndRenderer(
+			(int)passphrase_screen->width,
+			(int)passphrase_screen->height,
+			SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_OPENGL,
+			&ctx->window, &ctx->renderer
+		);
+
+		if(status < 0)
+		{
+			fprintf(
+				stderr, PROG_NAME ": Could not create window: %s\n",
+				SDL_GetError()
+			);
+
+			return HAKOMARI_ERR_IO;
+		}
+
+
+		if(SDL_GL_SetSwapInterval(-1) < 0)
+		{
+			fprintf(
+				stderr, PROG_NAME ": Could not set vsync: %s\n",
+				SDL_GetError()
+			);
+
+			if(SDL_GL_SetSwapInterval(1) < 0)
+			{
+				fprintf(
+					stderr, PROG_NAME ": Could not set vsync: %s\n",
+					SDL_GetError()
+				);
+			}
+		}
+	}
+	else
+	{
+		SDL_SetWindowSize(
+			ctx->window,
+			(int)passphrase_screen->width,
+			(int)passphrase_screen->height
+		);
+		SDL_ShowWindow(ctx->window);
+	}
+
+	SDL_RaiseWindow(ctx->window);
+
+	bool running = true;
+	uint32_t last_ticks = SDL_GetTicks();
+	error = HAKOMARI_OK;
+    while(running)
+	{
+		SDL_Event event;
+        while(SDL_PollEvent(&event))
+		{
+			switch(event.type)
+			{
+				case SDL_MOUSEMOTION:
+					error = hakomari_input_passphrase(
+						auth_ctx, event.motion.x, event.motion.y, false
+					);
+					if(error != HAKOMARI_OK) { running = false; continue; }
+					break;
+				case SDL_MOUSEBUTTONDOWN:
+					error = hakomari_input_passphrase(
+						auth_ctx, event.button.x, event.button.y, true
+					);
+					if(error != HAKOMARI_OK) { running = false; continue; }
+					break;
+				case SDL_QUIT:
+					running = false;
+					break;
+			}
+		}
+
+		// Keep alive by sending current mouse position
+		uint32_t current_ticks = SDL_GetTicks();
+		if(current_ticks - last_ticks > HAKOMARI_DEVICE_TIMEOUT / 2)
+		{
+			int x, y;
+			SDL_GetMouseState(&x, &y);
+			error = hakomari_input_passphrase(auth_ctx, x, y, false);
+			if(error != HAKOMARI_OK) { running = false; continue; }
+
+			last_ticks = current_ticks;
+		}
+
+        SDL_SetRenderDrawColor(ctx->renderer, 0, 0, 0, 0);
+        SDL_RenderClear(ctx->renderer);
+
+        SDL_SetRenderDrawColor(ctx->renderer, 255, 255, 255, 255);
+
+		for(unsigned int i = 0; i < passphrase_screen->num_buttons; ++i)
+		{
+			SDL_Rect rect = {
+				.x = passphrase_screen->buttons[i].x,
+				.y = passphrase_screen->buttons[i].y,
+				.w = passphrase_screen->buttons[i].width,
+				.h = passphrase_screen->buttons[i].height,
+			};
+
+			SDL_RenderDrawRect(ctx->renderer, &rect);
+		}
+
+        SDL_RenderPresent(ctx->renderer);
+    }
+
+	SDL_HideWindow(ctx->window);
+
+	return error;
+}
+
 int
 main(int argc, char* argv[])
 {
@@ -152,9 +294,29 @@ main(int argc, char* argv[])
 		}
 	}
 
+	if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0)
+	{
+		fprintf(stderr, PROG_NAME ": Could not init SDL: %s\n", SDL_GetError());
+		quit(EXIT_FAILURE);
+	}
+
 	if(hakomari_create_context(&ctx) != HAKOMARI_OK)
 	{
 		fprintf(stderr, PROG_NAME ": Could not create hakomari context\n");
+		quit(EXIT_FAILURE);
+	}
+
+	struct ask_passphrase_ctx_s ask_passphrase_ctx = {
+		.hakomari_ctx = ctx
+	};
+	hakomari_auth_handler_t auth_handler = {
+		.userdata = &ask_passphrase_ctx,
+		.ask_passphrase = ask_passphrase,
+	};
+	if(hakomari_set_auth_handler(ctx, &auth_handler) != HAKOMARI_OK)
+	{
+		hakomari_get_last_error(ctx, &error);
+		fprintf(stderr, PROG_NAME ": Could not set authentication handler: %s\n", error);
 		quit(EXIT_FAILURE);
 	}
 
@@ -162,7 +324,7 @@ main(int argc, char* argv[])
 	if(hakomari_enumerate_devices(ctx, &num_devices) != HAKOMARI_OK)
 	{
 		hakomari_get_last_error(ctx, &error);
-		fprintf(stderr, "Could not enumerate devices: %s\n", error);
+		fprintf(stderr, PROG_NAME ": Could not enumerate devices: %s\n", error);
 		quit(EXIT_FAILURE);
 	}
 
@@ -206,7 +368,7 @@ main(int argc, char* argv[])
 	if(hakomari_open_device(ctx, device_index, &device) != HAKOMARI_OK)
 	{
 		hakomari_get_last_error(ctx, &error);
-		fprintf(stderr, "Could not open device: %s\n", error);
+		fprintf(stderr, PROG_NAME ": Could not open device: %s\n", error);
 		quit(EXIT_FAILURE);
 	}
 
@@ -214,7 +376,7 @@ main(int argc, char* argv[])
 	if(hakomari_enumerate_endpoints(device, &num_endpoints) != HAKOMARI_OK)
 	{
 		hakomari_get_last_error(ctx, &error);
-		fprintf(stderr, "Could not enumerate endpoints: %s\n", error);
+		fprintf(stderr, PROG_NAME ": Could not enumerate endpoints: %s\n", error);
 		quit(EXIT_FAILURE);
 	}
 
@@ -321,7 +483,11 @@ main(int argc, char* argv[])
 	}
 
 quit:
+	if(ask_passphrase_ctx.renderer) { SDL_DestroyRenderer(ask_passphrase_ctx.renderer); }
+	if(ask_passphrase_ctx.window) { SDL_DestroyWindow(ask_passphrase_ctx.window); }
 	if(device != NULL) { hakomari_close_device(device); }
 	if(ctx != NULL) { hakomari_destroy_context(ctx); }
+	SDL_Quit();
+
 	return exit_code;
 }

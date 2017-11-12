@@ -82,7 +82,7 @@ solution "lip"
 	project "aya"
 		language "C"
 		kind "ConsoleApp"
-		links { "hakomari" }
+		links { "hakomari", "SDL2" }
 		files {
 			"src/aya.c"
 		}
