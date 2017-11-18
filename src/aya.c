@@ -27,6 +27,9 @@ struct ask_passphrase_ctx_s
 	hakomari_ctx_t* hakomari_ctx;
 	SDL_Window* window;
 	SDL_Renderer* renderer;
+	SDL_Texture* texture;
+	unsigned int last_width;
+	unsigned int last_height;
 };
 
 static hakomari_error_t
@@ -162,6 +165,55 @@ ask_passphrase(void* userdata, hakomari_auth_ctx_t* auth_ctx)
 		SDL_ShowWindow(ctx->window);
 	}
 
+	// Render passphrase screen to a texture
+	if(ctx->texture != NULL
+		&& (ctx->last_width != passphrase_screen->width
+			|| ctx->last_height != passphrase_screen->height)
+	)
+	{
+		SDL_DestroyTexture(ctx->texture);
+		ctx->texture = NULL;
+	}
+
+	if(ctx->texture == NULL)
+	{
+		ctx->texture = SDL_CreateTexture(
+			ctx->renderer,
+			SDL_PIXELFORMAT_RGBA8888,
+			SDL_TEXTUREACCESS_TARGET,
+			passphrase_screen->width,
+			passphrase_screen->height
+		);
+
+		if(ctx->texture == NULL)
+		{
+			fprintf(
+				stderr, PROG_NAME ": Could not create texture: %s\n",
+				SDL_GetError()
+			);
+		}
+
+		ctx->last_width = passphrase_screen->width;
+		ctx->last_height = passphrase_screen->height;
+	}
+
+	SDL_SetRenderTarget(ctx->renderer, ctx->texture);
+	SDL_SetRenderDrawColor(ctx->renderer, 0, 0, 0, 0);
+	SDL_RenderClear(ctx->renderer);
+	SDL_SetRenderDrawColor(ctx->renderer, 255, 255, 255, 255);
+	for(unsigned int y = 0; y < passphrase_screen->height; ++y)
+	{
+		for(unsigned int x = 0; x < passphrase_screen->width; ++x)
+		{
+			if(hakomari_get_pixel(passphrase_screen, x, y))
+			{
+				SDL_RenderDrawPoint(ctx->renderer, x, y);
+			}
+		}
+	}
+	SDL_RenderPresent(ctx->renderer);
+	SDL_SetRenderTarget(ctx->renderer, NULL);
+
 	SDL_RaiseWindow(ctx->window);
 
 	bool running = true;
@@ -206,21 +258,7 @@ ask_passphrase(void* userdata, hakomari_auth_ctx_t* auth_ctx)
 
         SDL_SetRenderDrawColor(ctx->renderer, 0, 0, 0, 0);
         SDL_RenderClear(ctx->renderer);
-
-        SDL_SetRenderDrawColor(ctx->renderer, 255, 255, 255, 255);
-
-		for(unsigned int i = 0; i < passphrase_screen->num_buttons; ++i)
-		{
-			SDL_Rect rect = {
-				.x = passphrase_screen->buttons[i].x,
-				.y = passphrase_screen->buttons[i].y,
-				.w = passphrase_screen->buttons[i].width,
-				.h = passphrase_screen->buttons[i].height,
-			};
-
-			SDL_RenderDrawRect(ctx->renderer, &rect);
-		}
-
+		SDL_RenderCopy(ctx->renderer, ctx->texture, NULL, NULL);
         SDL_RenderPresent(ctx->renderer);
     }
 
@@ -483,6 +521,7 @@ main(int argc, char* argv[])
 	}
 
 quit:
+	if(ask_passphrase_ctx.texture) { SDL_DestroyTexture(ask_passphrase_ctx.texture); }
 	if(ask_passphrase_ctx.renderer) { SDL_DestroyRenderer(ask_passphrase_ctx.renderer); }
 	if(ask_passphrase_ctx.window) { SDL_DestroyWindow(ask_passphrase_ctx.window); }
 	if(device != NULL) { hakomari_close_device(device); }

@@ -467,7 +467,7 @@ hakomari_open_device(
 void
 hakomari_close_device(hakomari_device_t* device)
 {
-	if(device->passphrase_screen.buttons) { free(device->passphrase_screen.buttons); }
+	if(device->passphrase_screen.image_data) { free(device->passphrase_screen.image_data); }
 	if(device->endpoints) { free(device->endpoints); }
 	sp_close(device->port);
 	sp_free_port(device->port);
@@ -784,6 +784,9 @@ hakomari_ask_passphrase(
 	}
 
 	hakomari_passphrase_screen_t* passphrase_screen = &device->passphrase_screen;
+	passphrase_screen->width = passphrase_screen->height = 0;
+	uint32_t image_data_size = 0;
+
 	for(uint32_t i = 0; i < map_size; ++i)
 	{
 		hakomari_string_t key;
@@ -811,75 +814,22 @@ hakomari_ask_passphrase(
 				passphrase_screen->height = dim;
 			}
 		}
-		else if(strcmp(key, "buttons") == 0)
+		else if(strcmp(key, "image_data") == 0)
 		{
-			uint32_t array_size;
-			if(!cmp_read_array(&device->cmp, &array_size))
+			if(!cmp_read_bin_size(&device->cmp, &image_data_size))
 			{
 				return hakomari_set_cmp_error(device);
 			}
 
-			passphrase_screen->num_buttons = array_size;
-			passphrase_screen->buttons = realloc(
-				passphrase_screen->buttons,
-				array_size * sizeof(struct hakomari_passphrase_button_s)
+			passphrase_screen->image_data = realloc(
+				passphrase_screen->image_data, image_data_size
 			);
 
-			for(uint32_t j = 0; j < array_size; ++j)
+			if(!device->cmp.read(
+				&device->cmp, passphrase_screen->image_data, image_data_size
+			))
 			{
-				struct hakomari_passphrase_button_s* button =
-					&passphrase_screen->buttons[j];
-
-				uint32_t map_size;
-				if(!cmp_read_map(&device->cmp, &map_size))
-				{
-					return hakomari_set_cmp_error(device);
-				}
-
-				if(map_size != 4)
-				{
-					return hakomari_set_last_error(
-						device->ctx, HAKOMARI_ERR_IO, "Format error"
-					);
-				}
-
-				for(uint32_t k = 0; k < map_size; ++k)
-				{
-					size = sizeof(key);
-					if(!cmp_read_str(&device->cmp, key, &size))
-					{
-						return hakomari_set_cmp_error(device);
-					}
-
-					uint32_t value;
-					if(!cmp_read_uint(&device->cmp, &value))
-					{
-						return hakomari_set_cmp_error(device);
-					}
-
-					if(strcmp(key, "x") == 0)
-					{
-						button->x = value;
-					}
-					else if(strcmp(key, "y") == 0)
-					{
-						button->y = value;
-					}
-					else if(strcmp(key, "w") == 0)
-					{
-						button->width = value;
-					}
-					else if(strcmp(key, "h") == 0)
-					{
-						button->height = value;
-					}
-					else
-					{
-						return hakomari_set_last_error(
-							device->ctx, HAKOMARI_ERR_IO, "Format error"
-						);
-					}
-				}
+				return hakomari_set_cmp_error(device);
 			}
 		}
 		else
@@ -888,6 +838,13 @@ hakomari_ask_passphrase(
 				device->ctx, HAKOMARI_ERR_IO, "Format error"
 			);
 		}
+	}
+
+	if(passphrase_screen->width * passphrase_screen->height / 8 != image_data_size)
+	{
+		return hakomari_set_last_error(
+			device->ctx, HAKOMARI_ERR_IO, "Format error"
+		);
 	}
 
 	// Actual passphrase prompt

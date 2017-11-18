@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #define HAKOMARI_DEVICE_TIMEOUT 10000
 
@@ -59,20 +60,11 @@ struct hakomari_auth_handler_s
 	);
 };
 
-struct hakomari_passphrase_button_s
-{
-	unsigned int x;
-	unsigned int y;
-	unsigned int width;
-	unsigned int height;
-};
-
 struct hakomari_passphrase_screen_s
 {
 	unsigned int width;
 	unsigned int height;
-	unsigned int num_buttons;
-	struct hakomari_passphrase_button_s* buttons;
+	void* image_data;
 };
 
 hakomari_error_t
@@ -147,6 +139,18 @@ static inline hakomari_error_t
 hakomari_read(hakomari_input_t* stream, void* buf, size_t* size)
 {
 	return stream->read(stream->userdata, buf, size);
+}
+
+static inline bool
+hakomari_get_pixel(
+	const hakomari_passphrase_screen_t* screen,
+	unsigned int x, unsigned int y
+)
+{
+	if(x >= screen->width || y >= screen->height) { return false; }
+
+	uint8_t byte = ((uint8_t*)(screen->image_data))[(x + y * screen->width) / 8];
+	return (byte >> (x % 8)) & 1;
 }
 
 #endif
