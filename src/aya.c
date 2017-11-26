@@ -284,6 +284,7 @@ main(int argc, char* argv[])
 	const char* help[] = {
 		NULL, "Print this message",
 		"INDEX", "Target a device (when multiple are plugged in)",
+		NULL, "Takes no input from stdin",
 	};
 
 	const char* usage = "Usage: " PROG_NAME " [options] <command>";
