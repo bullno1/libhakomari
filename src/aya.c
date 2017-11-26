@@ -299,6 +299,7 @@ main(int argc, char* argv[])
 	size_t device_index = 0;
 	hakomari_ctx_t* ctx = NULL;
 	hakomari_device_t* device = NULL;
+	struct ask_passphrase_ctx_s ask_passphrase_ctx = { 0 };
 	char* str_end;
 	const char* error;
 
@@ -345,9 +346,7 @@ main(int argc, char* argv[])
 		quit(EXIT_FAILURE);
 	}
 
-	struct ask_passphrase_ctx_s ask_passphrase_ctx = {
-		.hakomari_ctx = ctx
-	};
+	ask_passphrase_ctx.hakomari_ctx = ctx;
 	hakomari_auth_handler_t auth_handler = {
 		.userdata = &ask_passphrase_ctx,
 		.ask_passphrase = ask_passphrase,
