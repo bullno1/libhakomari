@@ -219,24 +219,28 @@ ask_passphrase(void* userdata, hakomari_auth_ctx_t* auth_ctx)
 	bool running = true;
 	uint32_t last_ticks = SDL_GetTicks();
 	error = HAKOMARI_OK;
+
     while(running)
 	{
+		int mouse_x, mouse_y;
+		bool mouse_down = false;
+		bool has_event = false;
+
 		SDL_Event event;
-        while(SDL_PollEvent(&event))
+		while(SDL_PollEvent(&event))
 		{
 			switch(event.type)
 			{
 				case SDL_MOUSEMOTION:
-					error = hakomari_input_passphrase(
-						auth_ctx, event.motion.x, event.motion.y, false
-					);
-					if(error != HAKOMARI_OK) { running = false; continue; }
+					has_event = true;
+					mouse_x = event.motion.x;
+					mouse_y = event.motion.y;
 					break;
 				case SDL_MOUSEBUTTONDOWN:
-					error = hakomari_input_passphrase(
-						auth_ctx, event.button.x, event.button.y, true
-					);
-					if(error != HAKOMARI_OK) { running = false; continue; }
+					has_event = true;
+					mouse_down = true;
+					mouse_x = event.button.x;
+					mouse_y = event.button.y;
 					break;
 				case SDL_QUIT:
 					running = false;
@@ -248,12 +252,15 @@ ask_passphrase(void* userdata, hakomari_auth_ctx_t* auth_ctx)
 		uint32_t current_ticks = SDL_GetTicks();
 		if(current_ticks - last_ticks > HAKOMARI_DEVICE_TIMEOUT / 2)
 		{
-			int x, y;
-			SDL_GetMouseState(&x, &y);
-			error = hakomari_input_passphrase(auth_ctx, x, y, false);
-			if(error != HAKOMARI_OK) { running = false; continue; }
-
+			has_event = true;
+			SDL_GetMouseState(&mouse_x, &mouse_y);
 			last_ticks = current_ticks;
+		}
+
+		if(has_event)
+		{
+			error = hakomari_input_passphrase(auth_ctx, mouse_x, mouse_y, mouse_down);
+			if(error != HAKOMARI_OK) { running = false; continue; }
 		}
 
         SDL_SetRenderDrawColor(ctx->renderer, 0, 0, 0, 0);
