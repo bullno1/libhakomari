@@ -14,8 +14,10 @@
 	do { \
 		hakomari_error_t error = HAKOMARI_OK; \
 		bool should_retry = false; \
+		bool first_time = true; \
 		do { \
-			error = OP(DEVICE, ENDPOINT, __VA_ARGS__); \
+			error = OP(DEVICE, ENDPOINT, first_time, __VA_ARGS__); \
+			first_time = false; \
 			should_retry = true \
 				&& error == HAKOMARI_ERR_AUTH_REQUIRED \
 				&& hakomari_ask_passphrase(DEVICE, ENDPOINT) == HAKOMARI_OK; \
@@ -47,6 +49,15 @@ struct hakomari_ctx_s
 	hakomari_auth_handler_t* auth_handler;
 };
 
+struct hakomari_mem_stream_s
+{
+	char* buff;
+	size_t capacity;
+	size_t read_pos;
+	size_t write_pos;
+	hakomari_input_t input;
+};
+
 struct hakomari_device_s
 {
 	hakomari_ctx_t* ctx;
@@ -58,6 +69,7 @@ struct hakomari_device_s
 	cmp_ctx_t cmp;
 	hakomari_input_t result;
 	hakomari_passphrase_screen_t passphrase_screen;
+	struct hakomari_mem_stream_s payload_buff;
 
 	uint8_t io_buf[HAKOMARI_BUF_SIZE];
 };
@@ -389,6 +401,68 @@ hakomari_device_read(void* userdata, void* buf, size_t* size)
 	}
 }
 
+static hakomari_error_t
+hakomari_mem_stream_read(void* userdata, void* buf, size_t* size)
+{
+	struct hakomari_mem_stream_s* mem_stream = userdata;
+	size_t available_bytes = mem_stream->write_pos - mem_stream->read_pos;
+	size_t bytes_to_read = available_bytes < *size ? available_bytes : *size;
+	memcpy(buf, mem_stream->buff + mem_stream->read_pos, bytes_to_read);
+	mem_stream->read_pos += bytes_to_read;
+	*size = bytes_to_read;
+
+	return HAKOMARI_OK;
+}
+
+static void
+hakomari_mem_stream_init(struct hakomari_mem_stream_s* mem_stream)
+{
+	*mem_stream = (struct hakomari_mem_stream_s){
+		.input = {
+			.userdata = mem_stream,
+			.read = hakomari_mem_stream_read
+		}
+	};
+}
+
+static void
+hakomari_mem_stream_cleanup(struct hakomari_mem_stream_s* mem_stream)
+{
+	free(mem_stream->buff);
+}
+
+static void
+hakomari_mem_stream_reset(struct hakomari_mem_stream_s* mem_stream)
+{
+	mem_stream->write_pos = 0;
+}
+
+static hakomari_input_t*
+hakomari_mem_stream_as_input(struct hakomari_mem_stream_s* mem_stream)
+{
+	mem_stream->read_pos = 0;
+	return &mem_stream->input;
+}
+
+static bool
+hakomari_mem_stream_write(
+	struct hakomari_mem_stream_s* mem_stream, void* buf, size_t size
+)
+{
+	size_t required_capacity = mem_stream->write_pos + size;
+	if(required_capacity > mem_stream->capacity)
+	{
+		mem_stream->buff = realloc(mem_stream->buff, required_capacity);
+		if(mem_stream->buff == NULL) { return false; }
+
+		mem_stream->capacity = required_capacity;
+	}
+
+	memcpy(mem_stream->buff + mem_stream->write_pos, buf, size);
+	mem_stream->write_pos += size;
+	return true;
+}
+
 hakomari_error_t
 hakomari_open_device(
 	hakomari_ctx_t* ctx, size_t index, hakomari_device_t** device_ptr
@@ -459,6 +533,7 @@ hakomari_open_device(
 
 	hakomari_reset_cmp(device);
 	slipper_init(&device->slipper, &slipper_cfg);
+	hakomari_mem_stream_init(&device->payload_buff);
 
 	*device_ptr = device;
 	return hakomari_set_last_error(ctx, HAKOMARI_OK, NULL);
@@ -471,6 +546,7 @@ hakomari_close_device(hakomari_device_t* device)
 	if(device->endpoints) { free(device->endpoints); }
 	sp_close(device->port);
 	sp_free_port(device->port);
+	hakomari_mem_stream_cleanup(&device->payload_buff);
 	free(device);
 }
 
@@ -693,17 +769,39 @@ hakomari_end_query(hakomari_device_t* device, hakomari_input_t** result)
 }
 
 static hakomari_error_t
-hakomari_send_payload(hakomari_device_t* device, hakomari_input_t* payload)
+hakomari_send_payload(
+	hakomari_device_t* device, bool first_time, hakomari_input_t* payload
+)
 {
 	char buf[HAKOMARI_BUF_SIZE];
 	size_t size;
 
+	hakomari_input_t* source = NULL;
+	if(first_time)
+	{
+		source = payload;
+		hakomari_mem_stream_reset(&device->payload_buff);
+	}
+	else
+	{
+		source = hakomari_mem_stream_as_input(&device->payload_buff);
+	}
+
 	do
 	{
 		size = HAKOMARI_BUF_SIZE;
-		switch(hakomari_read(payload, buf, &size))
+		switch(hakomari_read(source, buf, &size))
 		{
 			case HAKOMARI_OK:
+				if(first_time &&
+					!hakomari_mem_stream_write(&device->payload_buff, buf, size)
+				)
+				{
+					return hakomari_set_last_error(
+						device->ctx, HAKOMARI_ERR_MEMORY, NULL
+					);
+				}
+
 				if(slipper_write(
 					&device->slipper, buf, size, HAKOMARI_DEVICE_TIMEOUT
 				) != SLIPPER_OK)
@@ -730,6 +828,7 @@ hakomari_send_payload(hakomari_device_t* device, hakomari_input_t* payload)
 static hakomari_error_t
 hakomari_query_endpoint_authenticated(
 	hakomari_device_t* device, const hakomari_endpoint_desc_t* desc,
+	bool first_time,
 	const hakomari_string_t query, hakomari_input_t* payload,
 	hakomari_input_t** result
 )
@@ -742,7 +841,7 @@ hakomari_query_endpoint_authenticated(
 
 	if(true
 		&& payload != NULL
-		&& (error = hakomari_send_payload(device, payload)) != HAKOMARI_OK
+		&& (error = hakomari_send_payload(device, first_time, payload)) != HAKOMARI_OK
 	)
 	{
 		return error;
@@ -766,7 +865,7 @@ hakomari_ask_passphrase(
 
 	// Get specification for the passphrase input screen
 	error = hakomari_query_endpoint_authenticated(
-		device, endpoint, "@get-passphrase-screen", NULL, NULL
+		device, endpoint, true, "@get-passphrase-screen", NULL, NULL
 	);
 	if(error != HAKOMARI_OK) { return error; }
 
@@ -975,9 +1074,11 @@ hakomari_enumerate_endpoints(hakomari_device_t* device, size_t* num_endpoints)
 static hakomari_error_t
 hakomari_create_or_destroy_endpoint_authenticated(
 	hakomari_device_t* device, const hakomari_endpoint_desc_t* endpoint,
-	const char* op
+	bool first_time, const char* op
 )
 {
+	(void)first_time;
+
 	hakomari_error_t error;
 	if((error = hakomari_begin_query(device, NULL, op)) != HAKOMARI_OK)
 	{
