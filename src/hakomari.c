@@ -407,7 +407,10 @@ hakomari_mem_stream_read(void* userdata, void* buf, size_t* size)
 	struct hakomari_mem_stream_s* mem_stream = userdata;
 	size_t available_bytes = mem_stream->write_pos - mem_stream->read_pos;
 	size_t bytes_to_read = available_bytes < *size ? available_bytes : *size;
-	memcpy(buf, mem_stream->buff + mem_stream->read_pos, bytes_to_read);
+	if(bytes_to_read > 0)
+	{
+		memcpy(buf, mem_stream->buff + mem_stream->read_pos, bytes_to_read);
+	}
 	mem_stream->read_pos += bytes_to_read;
 	*size = bytes_to_read;
 
@@ -458,7 +461,7 @@ hakomari_mem_stream_write(
 		mem_stream->capacity = required_capacity;
 	}
 
-	memcpy(mem_stream->buff + mem_stream->write_pos, buf, size);
+	if(size > 0) { memcpy(mem_stream->buff + mem_stream->write_pos, buf, size); }
 	mem_stream->write_pos += size;
 	return true;
 }
